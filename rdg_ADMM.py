@@ -101,6 +101,13 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
     G_pt = G_p.T
     div_p = G_pt.multiply(np.repeat(ta, 3))
 
+    # Initialize variables
+    u_p = np.zeros(nv - len(x0))
+    y = np.zeros(3*nf)
+    z = np.zeros(3*nf)
+    div_y = np.zeros(nv)
+    div_z = np.zeros(nv)
+
     if reg == 'vfa' or reg == 'H':
         Ww_s_p = Ww_s.copy()
         Ww_s_p[:, x0] = 0
@@ -112,16 +119,22 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
 
     # Pre-factorization
     if reg == 'D':
+        Ww_p = Ww_p + 1e-10 * diags(np.ones(Ww_p.shape[0]))  # Add small regularization
+        if not np.allclose(Ww_p.toarray(), Ww_p.toarray().T):
+            raise ValueError("Ww_p is not symmetric")
         L = np.linalg.cholesky(Ww_p.toarray())
         P = np.arange(nv - len(x0))
     else:  # 'H', 'vfa'
         if not varRho:
+            Ww_s_p = Ww_s_p + 1e-10 * diags(np.ones(Ww_s_p.shape[0]))  # Add small regularization
+            if not np.allclose((alpha*Ww_s_p + rho*Ww_p).toarray(), (alpha*Ww_s_p + rho*Ww_p).toarray().T):
+                raise ValueError("alpha*Ww_s_p + rho*Ww_p is not symmetric")
             L = np.linalg.cholesky((alpha*Ww_s_p + rho*Ww_p).toarray())
             P = np.arange(nv - len(x0))
 
     for ii in range(niter):
         # Step 1 - u-minimization
-        b = va_p - div_y + rho*div_z
+        b = va_p[nv_p] - div_y[nv_p] + rho*div_z[nv_p]
 
         if reg == 'D':
             u_p = np.linalg.solve(L.T, np.linalg.solve(L, b[P]))[P] / (alpha + rho)
@@ -145,8 +158,9 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
 
         # Step 3 - dual variable update
         y = y + rho*(alphak*Gx + (1-alphak)*zold - z)
-        div_y = div_p @ y
-
+        div_y = np.zeros(nv)
+        div_y[nv_p] = div_p @ y
+    
         # Residuals update
         tasqGx = tasq * Gx
         tasqZ = tasq * z
