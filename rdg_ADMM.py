@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.sparse import diags, spdiags, csr_matrix
-from scipy.sparse.linalg import spsolve
+from scipy.linalg import cho_factor, cho_solve
 from MeshClass import MeshClass
 from smoothVF import smooth_vf
 
@@ -60,7 +60,7 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
     # ADMM parameters
     rho = 2 * np.sqrt(np.sum(va))
     niter = 10000
-    QUIET = 1
+    QUIET = 0
     ABSTOL = 1e-5 / 2
     RELTOL = 1e-2
     mu = 10
@@ -75,20 +75,6 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
     thresh1 = np.sqrt(3*nf) * ABSTOL * np.sqrt(np.sum(va))
     thresh2 = np.sqrt(nv) * ABSTOL * np.sum(va)
 
-    u_p = np.zeros(nv - len(x0))
-    y = np.zeros(3*nf)
-    z = np.zeros(3*nf)
-    div_y = np.zeros(nv - len(x0))
-    div_z = np.zeros(nv - len(x0))
-
-    history = {
-        'r_norm': np.zeros(niter),
-        's_norm': np.zeros(niter),
-        'eps_pri': np.zeros(niter),
-        'eps_dual': np.zeros(niter)
-    }
-
-    # Eliminating x0 (b.c)
     nv_p = np.arange(nv)
     nv_p = np.delete(nv_p, x0)
     va_p = va.copy()
@@ -101,7 +87,6 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
     G_pt = G_p.T
     div_p = G_pt.multiply(np.repeat(ta, 3))
 
-    # Initialize variables
     u_p = np.zeros(nv - len(x0))
     y = np.zeros(3*nf)
     z = np.zeros(3*nf)
@@ -122,69 +107,73 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
         Ww_p = Ww_p + 1e-10 * diags(np.ones(Ww_p.shape[0]))  # Add small regularization
         if not np.allclose(Ww_p.toarray(), Ww_p.toarray().T):
             raise ValueError("Ww_p is not symmetric")
-        L = np.linalg.cholesky(Ww_p.toarray())
-        P = np.arange(nv - len(x0))
+        c, low = cho_factor(Ww_p.toarray())
     else:  # 'H', 'vfa'
         if not varRho:
-            Ww_s_p = Ww_s_p + 1e-10 * diags(np.ones(Ww_s_p.shape[0]))  # Add small regularization
-            if not np.allclose((alpha*Ww_s_p + rho*Ww_p).toarray(), (alpha*Ww_s_p + rho*Ww_p).toarray().T):
-                raise ValueError("alpha*Ww_s_p + rho*Ww_p is not symmetric")
-            L = np.linalg.cholesky((alpha*Ww_s_p + rho*Ww_p).toarray())
-            P = np.arange(nv - len(x0))
+            c, low = cho_factor(alpha * Ww_s_p + rho * Ww_p)
 
     for ii in range(niter):
         # Step 1 - u-minimization
-        b = va_p[nv_p] - div_y[nv_p] + rho*div_z[nv_p]
+        b = va_p - div_y + rho * div_z
 
         if reg == 'D':
-            u_p = np.linalg.solve(L.T, np.linalg.solve(L, b[P]))[P] / (alpha + rho)
+            u_p = cho_solve((c, low), b) / (alpha + rho)
         else:  # 'H', 'vfa'
             if not varRho:
-                u_p = np.linalg.solve(L.T, np.linalg.solve(L, b[P]))[P]
-            else:  # reg == 'H' and varRho
-                u_p = spsolve(alpha*Ww_s_p + rho*Ww_p, b)
+                u_p = cho_solve((c, low), b)
+            else:  # 'H' with varRho
+                u_p = np.linalg.solve(alpha * Ww_s_p + rho * Ww_p, b)
+
         Gx = G_p @ u_p
 
         # Step 2 - z-minimization
         zold = z.copy()
         div_zold = div_z.copy()
-        z = (1/rho)*y + Gx
-        z = z.reshape(nf, 3)
-        norm_z = np.sqrt(np.sum(z**2, axis=1))
+        z = (1 / rho) * y + Gx
+        z = z.reshape(nf, 3).T
+        max_abs_z = np.max(np.abs(z), axis=0)
+        norm_z = max_abs_z * np.linalg.norm(z / max_abs_z, axis=0)
         norm_z[norm_z < 1] = 1
-        z = (z.T / norm_z).T
-        z = z.ravel()
+        z = (z / norm_z).T.ravel()
         div_z = div_p @ z
 
         # Step 3 - dual variable update
-        y = y + rho*(alphak*Gx + (1-alphak)*zold - z)
-        div_y = np.zeros(nv)
-        div_y[nv_p] = div_p @ y
-    
+        y = y + rho * (alphak * Gx + (1 - alphak) * zold - z)
+        div_y = div_p @ y
+
         # Residuals update
         tasqGx = tasq * Gx
         tasqZ = tasq * z
-        history['r_norm'][ii] = np.linalg.norm(tasqGx - tasqZ)
-        history['s_norm'][ii] = rho * np.linalg.norm(div_z - div_zold)
-        history['eps_pri'][ii] = thresh1 + RELTOL * max(np.linalg.norm(tasqGx), np.linalg.norm(tasqZ))
-        history['eps_dual'][ii] = thresh2 + RELTOL * np.linalg.norm(div_y)
+        max_abs_diff = np.max(np.abs(tasqGx - tasqZ))
+        history_r_norm = max_abs_diff * np.linalg.norm(((tasqGx - tasqZ) / max_abs_diff).reshape(-1, 1), 'fro')
+
+        max_abs_div_diff = np.max(np.abs(div_z - div_zold))
+        history_s_norm = rho * max_abs_div_diff * np.linalg.norm(((div_z - div_zold) / max_abs_div_diff).reshape(-1, 1), 'fro')
+
+        max_abs_tasqGx = np.max(np.abs(tasqGx))
+        max_abs_tasqZ = np.max(np.abs(tasqZ))
+        history_eps_pri = thresh1 + RELTOL * max(
+            max_abs_tasqGx * np.linalg.norm((tasqGx / max_abs_tasqGx).reshape(-1, 1), 'fro'),
+            max_abs_tasqZ * np.linalg.norm((tasqZ / max_abs_tasqZ).reshape(-1, 1), 'fro')
+        )
+
+        max_abs_div_y = np.max(np.abs(div_y))
+        history_eps_dual = thresh2 + RELTOL * max_abs_div_y * np.linalg.norm((div_y / max_abs_div_y).reshape(-1, 1), 'fro')
+
 
         if not QUIET:
-            print('{:3d}\t{:10.4f}\t{:10.4f}\t{:10.4f}\t{:10.4f}'.format(
-                ii, history['r_norm'][ii], history['eps_pri'][ii],
-                history['s_norm'][ii], history['eps_dual'][ii]))
+            print(f'{ii:3d}\t{history_r_norm:10.4f}\t{history_eps_pri:10.4f}\t{history_s_norm:10.4f}\t{history_eps_dual:10.4f}')
 
-        if history['r_norm'][ii] < history['eps_pri'][ii] and history['s_norm'][ii] < history['eps_dual'][ii]:
+        # Stopping criteria
+        if ii > 1 and history_r_norm < history_eps_pri and history_s_norm < history_eps_dual:
             break
 
         # Varying penalty parameter
         if varRho:
-            if history['r_norm'][ii] > mu * history['s_norm'][ii]:
+            if history_r_norm > mu * history_s_norm:
                 rho *= tauinc
-                y /= tauinc
-            elif history['s_norm'][ii] > mu * history['r_norm'][ii]:
+            elif history_s_norm > mu * history_r_norm:
                 rho /= taudec
-                y *= taudec
 
     u = np.zeros(nv)
     u[nv_p] = u_p
