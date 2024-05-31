@@ -14,7 +14,6 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
         reg (str, optional): The type of regularizer to use. Options are:
             'D': Dirichlet (default)
             'vfa': Vector Field Alignment
-            'H': Dirichlet (same as 'D', but with a different weight calculation)
         alpha_hat (float, optional): The regularizer weight, which is scale-invariant. Default is 0.1.
         beta_hat (float, optional): The vector field alignment weight, relevant when `reg` is 'vfa'. Default is 0.
         vf (numpy.ndarray, optional): A matrix of size |F|x3 representing the vector field to align to, relevant when `reg` is 'vfa'. Default is 0.
@@ -37,10 +36,6 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
     if reg == 'D':
         alpha = alpha_hat * np.sqrt(np.sum(va))
         varRho = 1
-    elif reg == 'H':
-        alpha = alpha_hat * np.sqrt(np.sum(va) ** 3)
-        Ww_s = curved_hessian(vertices, faces)  # Ensure that the mex `curved_hessian` is available
-        varRho = 0
     elif reg == 'vfa':
         alpha = alpha_hat * np.sqrt(np.sum(va))
         beta = beta_hat * np.sqrt(np.sum(va))
