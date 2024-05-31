@@ -16,6 +16,8 @@ class MeshClass:
     def compute_all(self):
         self.nv = self.vertices.shape[0]
         self.nf = self.faces.shape[0]
+        print(f"Number of vertices (nv): {self.nv}")
+        print(f"Number of faces (nf): {self.nf}")
         self.Nf = self.normalize_vf(np.cross(self.vertices[self.faces[:, 1]] - self.vertices[self.faces[:, 0]],
                                              self.vertices[self.faces[:, 2]] - self.vertices[self.faces[:, 0]]))
         self.ta = np.sqrt(np.sum(self.Nf**2, axis=1)) / 2
@@ -27,8 +29,7 @@ class MeshClass:
         self.R = self.rot()
         EE = np.sort(np.concatenate((self.faces[:, [0, 1]], self.faces[:, [1, 2]], self.faces[:, [2, 0]])), axis=1)
         self.E, une = np.unique(EE, axis=0, return_index=True)
-        self.edges = self.E
-        self.e2t, self.t2e, self.v2e, self.ie, self.ne, self.nie, self.inner_edges, self.bv, self.bf = self.nc_data()
+        self.edges, self.e2t, self.t2e, self.e2t1, self.e2t2, self.v2e, self.ie, self.ne, self.nie, self.inner_edges, self.bv, self.bf = self.nc_data()
         self.ea = self.edge_areas()
         self.edge_basis()
         self.compute_LB()
@@ -61,7 +62,8 @@ class MeshClass:
 
     def edge_basis(self):
         NE1 = self.normalize_vf(self.E1)
-        NE2 = self.R @ NE1.reshape(-1, 3, 1)).reshape(-1, 3)
+        NE2 = self.R @ NE1.reshape(-1, 1)
+        NE2 = NE2.reshape(-1, 3)
         I = np.repeat(np.arange(self.nf), 3)
         J = np.tile(np.arange(self.nf), 3) + np.repeat(np.arange(3) * self.nf, self.nf)
         B1 = csr_matrix((NE1.ravel(), (I, J)), shape=(self.nf, 3 * self.nf))
@@ -115,16 +117,16 @@ class MeshClass:
         return rvf
 
     def compute_LB(self):
-        self.Ww = self.cotLaplacian()
+        self.Ww, _ = self.cotLaplacian(self)
         laplacian = diags(1 / self.va) @ self.Ww
         self.Lap = laplacian
         self.Aa = diags(self.va)
 
     def GG(self):
-        I = np.repeat(np.arange(self.nf), 9)
-        II = np.concatenate((I, I + self.nf, I + 2 * self.nf))
-        J = self.faces.ravel()
-        JJ = np.tile(J, 3)
+        I = np.tile(np.arange(self.nf), (3, 1))
+        II = np.concatenate((I.ravel(), I.ravel() + self.nf, I.ravel() + 2 * self.nf))
+        J = self.faces.T.ravel()
+        JJ = np.repeat(J, 3)
         RE1 = self.rotate_vf(self.E1)
         RE2 = self.rotate_vf(self.E2)
         RE3 = self.rotate_vf(self.E3)
@@ -145,21 +147,22 @@ class MeshClass:
         self.D = D
 
     def vertex_normals(self):
-        I = self.faces.ravel()
-        J = np.repeat(np.arange(3), 3 * self.nf)
+        I = np.repeat(self.faces, 3, axis=0).ravel()
+        J = np.tile(np.arange(3), 3 * self.nf)
+
         TA = diags(np.repeat(self.ta, 3))
-        S = np.repeat(TA.diagonal()[:self.nf] * self.Nf, 3).ravel()
+        S = np.repeat(TA.diagonal()[:self.nf, np.newaxis] * self.Nf, 3, axis=0).ravel()
         Nv = csr_matrix((S, (I, J)), shape=(self.nv, 3)).toarray()
         Nv = self.normalize_vf(Nv)
         return Nv
-
+    
     def nc_data(self):
         T = self.faces
         I = np.concatenate((T[:, 1], T[:, 2], T[:, 0]))
         J = np.concatenate((T[:, 2], T[:, 0], T[:, 1]))
-        S = np.arange(self.nf)
+        S = np.arange(1, self.nf + 1)
         S = np.concatenate((S, S, S))
-        E = csr_matrix((S + 1, (I, J)), shape=(self.nv, self.nv))
+        E = csr_matrix((S, (I, J)), shape=(self.nv, self.nv))
         Elisto = np.vstack((I, J)).T
         sElist = np.sort(Elisto, axis=1)
         s = (self.normv(Elisto - sElist) > 1e-12)
@@ -174,17 +177,17 @@ class MeshClass:
             t1 = t[une[m]]
             t2 = -(E[i, j] + E[j, i] - abs(t1)) * np.sign(t1)
             e2t[m, :2] = [t1, t2]
-            f = T[abs(t1)]
+            f = T[abs(t1) - 1]
             loc = np.where(f == (f.sum() - i - j))[0]
-            t2e[abs(t1), loc] = m * np.sign(t1)
+            t2e[abs(t1) - 1, loc] = m * np.sign(t1)
             e2t[m, 2] = loc
             if t2 != 0:
-                f = T[abs(t2)]
+                f = T[abs(t2) - 1]
                 loc = np.where(f == (f.sum() - i - j))[0]
-                t2e[abs(t2), loc] = m * np.sign(t2)
+                t2e[abs(t2) - 1, loc] = m * np.sign(t2)
                 e2t[m, 3] = loc
                 ie[m] = 1
-        v2e = csr_matrix((np.ones(len(edges)), (edges[:, 0], edges[:, 1])), shape=(self.nv, self.nv))
+        v2e = csr_matrix((np.arange(1, len(edges) + 1), (edges[:, 0], edges[:, 1])), shape=(self.nv, self.nv))
         ne = edges.shape[0]
         nie = np.sum(ie)
         inner_edges = np.where(ie)[0]
@@ -196,9 +199,56 @@ class MeshClass:
         t2 = abs(e2t[inner_edges, 1])
         I = np.arange(2 * nie)
         S = np.ones(2 * nie)
-        e2t1 = csr_matrix((S, (I, np.concatenate((t1, t1 + self.nf)))), shape=(2 * nie, 2 * self.nf))
-        e2t2 = csr_matrix((S, (I, np.concatenate((t2, t2 + self.nf)))), shape=(2 * nie, 2 * self.nf))
-        return e2t, t2e, v2e, ie, ne, nie, inner_edges, bv, bf
+        e2t1 = csr_matrix((S, (I, np.concatenate((t1 - 1, t1 + self.nf - 1)))), shape=(2 * nie, 2 * self.nf))
+        e2t2 = csr_matrix((S, (I, np.concatenate((t2 - 1, t2 + self.nf - 1)))), shape=(2 * nie, 2 * self.nf))
+        return edges, e2t, t2e, e2t1, e2t2, v2e, ie, ne, nie, inner_edges, bv, bf
+
+    # def nc_data(self):
+    #     T = self.faces
+    #     I = np.concatenate((T[:, 1], T[:, 2], T[:, 0]))
+    #     J = np.concatenate((T[:, 2], T[:, 0], T[:, 1]))
+    #     S = np.arange(self.nf)
+    #     S = np.concatenate((S, S, S))
+    #     E = csr_matrix((S + 1, (I, J)), shape=(self.nv, self.nv))
+    #     Elisto = np.vstack((I, J)).T
+    #     sElist = np.sort(Elisto, axis=1)
+    #     s = (self.normv(Elisto - sElist) > 1e-12)
+    #     t = S * (-1) ** s
+    #     edges, une = np.unique(sElist, axis=0, return_index=True)
+    #     ne = edges.shape[0]
+    #     e2t = np.zeros((ne, 4), dtype=int)
+    #     t2e = np.zeros((self.nf, 3), dtype=int)
+    #     ie = np.zeros(ne, dtype=int)
+    #     for m in range(len(edges)):
+    #         i, j = edges[m]
+    #         t1 = t[une[m]]
+    #         t2 = -(E[i, j] + E[j, i] - abs(t1)) * np.sign(t1)
+    #         e2t[m, :2] = [t1, t2]
+    #         f = T[abs(t1)]
+    #         loc = np.where(f == (f.sum() - i - j))[0]
+    #         t2e[abs(t1), loc] = m * np.sign(t1)
+    #         e2t[m, 2] = loc
+    #         if t2 != 0:
+    #             f = T[abs(t2)]
+    #             loc = np.where(f == (f.sum() - i - j))[0]
+    #             t2e[abs(t2), loc] = m * np.sign(t2)
+    #             e2t[m, 3] = loc
+    #             ie[m] = 1
+    #     v2e = csr_matrix((np.ones(len(edges)), (edges[:, 0], edges[:, 1])), shape=(self.nv, self.nv))
+    #     ne = edges.shape[0]
+    #     nie = np.sum(ie)
+    #     inner_edges = np.where(ie)[0]
+    #     bv = np.zeros(self.nv, dtype=int)
+    #     bv[edges[ie == 0].ravel()] = 1
+    #     bf = np.zeros(self.nf, dtype=int)
+    #     bf[np.sum(np.isin(self.faces, np.where(bv == 1)[0]), axis=1) > 0] = 1
+    #     t1 = abs(e2t[inner_edges, 0])
+    #     t2 = abs(e2t[inner_edges, 1])
+    #     I = np.arange(2 * nie)
+    #     S = np.ones(2 * nie)
+    #     e2t1 = csr_matrix((S, (I, np.concatenate((t1, t1 + self.nf)))), shape=(2 * nie, 2 * self.nf))
+    #     e2t2 = csr_matrix((S, (I, np.concatenate((t2, t2 + self.nf)))), shape=(2 * nie, 2 * self.nf))
+    #     return e2t, t2e, v2e, ie, ne, nie, inner_edges, bv, bf
 
     def normalize_mesh(self, bbdO=1):
         xx = self.vertices - self.vertices.mean(axis=0)
@@ -291,7 +341,7 @@ class MeshClass:
         if nisolines > 0:
             ax.tricontour(self.vertices[:, 0], self.vertices[:, 1], self.vertices[:, 2], self.faces, u, nisolines, cmap='jet')
         else:
-        ax.set_cmap('jet')
+            ax.set_cmap('jet')
         if cam is not None:
             ax.view_init(elev=cam[0], azim=cam[1])
         else:
@@ -345,20 +395,82 @@ class MeshClass:
     def set_camera(ca, cam):
         ca.view_init(elev=cam[0], azim=cam[1])
 
+    # @staticmethod
+    # def cotLaplacian(mesh):
+    #     T = mesh.faces
+    #     I = np.concatenate((T[:, 1], T[:, 2], T[:, 0], T[:, 2], T[:, 0], T[:, 1]))
+    #     J = np.concatenate((T[:, 2], T[:, 0], T[:, 1], T[:, 1], T[:, 2], T[:, 0]))
+    #     E1 = mesh.vertices[I] - mesh.vertices[J]
+    #     E2 = mesh.vertices[np.concatenate((T[:, 0], T[:, 1], T[:, 2]))] - mesh.vertices[J]
+    #     E3 = mesh.vertices[I] - mesh.vertices[np.concatenate((T[:, 0], T[:, 1], T[:, 2]))]
+    #     A = 0.5 * np.sqrt(np.sum(np.cross(E1, E2) ** 2, axis=1))
+    #     cot12 = np.sum(E1 * E2, axis=1) / A
+    #     cot23 = np.sum(-E3 * E1, axis=1) / A
+    #     cot31 = np.sum(E2 * E3, axis=1) / A
+    #     In = np.concatenate((I, J, I, J))
+    #     Jn = np.concatenate((J, I, I, J))
+    #     Sn = np.concatenate((cot12, cot12, cot23, cot31))
+    #     W = csr_matrix((Sn, (In, Jn)), shape=(mesh.nv, mesh.nv))
+    #     return W
+
     @staticmethod
-    def cotLaplacian(mesh):
+    def cotLaplacian(mesh, L23=None, L13=None, L12=None):
+        X = mesh.vertices
         T = mesh.faces
-        I = np.concatenate((T[:, 1], T[:, 2], T[:, 0], T[:, 2], T[:, 0], T[:, 1]))
-        J = np.concatenate((T[:, 2], T[:, 0], T[:, 1], T[:, 1], T[:, 2], T[:, 0]))
-        E1 = mesh.vertices[I] - mesh.vertices[J]
-        E2 = mesh.vertices[np.concatenate((T[:, 0], T[:, 1], T[:, 2]))] - mesh.vertices[J]
-        E3 = mesh.vertices[I] - mesh.vertices[np.concatenate((T[:, 0], T[:, 1], T[:, 2]))]
-        A = 0.5 * np.sqrt(np.sum(np.cross(E1, E2) ** 2, axis=1))
-        cot12 = np.sum(E1 * E2, axis=1) / A
-        cot23 = np.sum(-E3 * E1, axis=1) / A
-        cot31 = np.sum(E2 * E3, axis=1) / A
+        nv = X.shape[0]
+
+        inputL = sum([L23 is not None, L13 is not None, L12 is not None])
+        if inputL < 3:
+            L1 = MeshClass.normv(X[T[:, 1]] - X[T[:, 2]])
+            L2 = MeshClass.normv(X[T[:, 0]] - X[T[:, 2]])
+            L3 = MeshClass.normv(X[T[:, 0]] - X[T[:, 1]])
+        else:
+            L1 = L23
+            L2 = L13
+            L3 = L12
+
+        A1 = (L2**2 + L3**2 - L1**2) / (2 * L2 * L3)
+        A2 = (L1**2 + L3**2 - L2**2) / (2 * L1 * L3)
+        A3 = (L1**2 + L2**2 - L3**2) / (2 * L1 * L2)
+        A = np.arccos(np.column_stack((A1, A2, A3)))
+
+        I = np.concatenate((T[:, 0], T[:, 1], T[:, 2]))
+        J = np.concatenate((T[:, 1], T[:, 2], T[:, 0]))
+        S = 0.5 * np.concatenate((1 / np.tan(A[:, 2]), 1 / np.tan(A[:, 0]), 1 / np.tan(A[:, 1])))
         In = np.concatenate((I, J, I, J))
         Jn = np.concatenate((J, I, I, J))
-        Sn = np.concatenate((cot12, cot12, cot23, cot31))
-        W = csr_matrix((Sn, (In, Jn)), shape=(mesh.nv, mesh.nv))
-        return W
+        Sn = np.concatenate((-S, -S, S, S))
+        W = csr_matrix((Sn, (In, Jn)), shape=(nv, nv))
+
+        if inputL < 3:
+            M = MeshClass.mass_matrix_barycentric(mesh)
+            A = M.sum(axis=1)
+        else:
+            M = MeshClass.mass_matrix_barycentric(mesh, L1, L2, L3)
+            A = M.sum(axis=1)
+
+        return W, A
+
+    @staticmethod
+    def mass_matrix_barycentric(mesh, L1=None, L2=None, L3=None):
+        T = mesh.faces
+        inputL = sum([L1 is not None, L2 is not None, L3 is not None])
+        if inputL < 3:
+            Ar = mesh.ta
+        else:
+            s = (L1 + L2 + L3) / 2
+            Ar = np.sqrt(s * (s - L1) * (s - L2) * (s - L3))
+
+        nv = mesh.nv
+
+        I = np.concatenate((T[:, 0], T[:, 1], T[:, 2]))
+        J = np.concatenate((T[:, 1], T[:, 2], T[:, 0]))
+        Mij = np.repeat(Ar / 12, 3)
+        Mji = Mij
+        Mii = np.repeat(Ar / 6, 3)
+        In = np.concatenate((I, J, I))
+        Jn = np.concatenate((J, I, I))
+        Mn = np.concatenate((Mij, Mji, Mii))
+        M = csr_matrix((Mn, (In, Jn)), shape=(nv, nv))
+
+        return M
