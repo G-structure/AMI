@@ -6,8 +6,8 @@ from mpl_toolkits.mplot3d import Axes3D
 class MeshClass:
     def __init__(self, vertices=None, faces=None, name=None):
         if vertices is not None and faces is not None:
-            self.vertices = vertices
-            self.faces = faces
+            self.vertices = np.array(vertices, dtype=np.float64)
+            self.faces = np.array(faces, dtype=np.int32)
             self.name = name if name is not None else "Unnamed Mesh"
         else:
             raise ValueError("Please provide vertices and faces.")
@@ -16,11 +16,10 @@ class MeshClass:
     def compute_all(self):
         self.nv = self.vertices.shape[0]
         self.nf = self.faces.shape[0]
-        print(f"Number of vertices (nv): {self.nv}")
-        print(f"Number of faces (nf): {self.nf}")
-        self.Nf = self.normalize_vf(np.cross(self.vertices[self.faces[:, 1]] - self.vertices[self.faces[:, 0]],
-                                             self.vertices[self.faces[:, 2]] - self.vertices[self.faces[:, 0]]))
-        self.ta = np.sqrt(np.sum(self.Nf**2, axis=1)) / 2
+        Nf = np.cross(self.vertices[self.faces[:, 0]] - self.vertices[self.faces[:, 1]],
+            self.vertices[self.faces[:, 0]] - self.vertices[self.faces[:, 2]])
+        self.Nf = self.normalize_vf(Nf);
+        self.ta = np.sqrt(np.sum(Nf**2, axis=1)) / 2
         self.Nv = self.vertex_normals()
         self.va = self.calculatefvConnectivity().T @ self.ta / 3
         self.E1 = self.vertices[self.faces[:, 1]] - self.vertices[self.faces[:, 2]]
@@ -155,7 +154,7 @@ class MeshClass:
         Nv = csr_matrix((S, (I, J)), shape=(self.nv, 3)).toarray()
         Nv = self.normalize_vf(Nv)
         return Nv
-    
+
     def nc_data(self):
         T = self.faces
         I = np.concatenate((T[:, 1], T[:, 2], T[:, 0]))
@@ -202,53 +201,6 @@ class MeshClass:
         e2t1 = csr_matrix((S, (I, np.concatenate((t1 - 1, t1 + self.nf - 1)))), shape=(2 * nie, 2 * self.nf))
         e2t2 = csr_matrix((S, (I, np.concatenate((t2 - 1, t2 + self.nf - 1)))), shape=(2 * nie, 2 * self.nf))
         return edges, e2t, t2e, e2t1, e2t2, v2e, ie, ne, nie, inner_edges, bv, bf
-
-    # def nc_data(self):
-    #     T = self.faces
-    #     I = np.concatenate((T[:, 1], T[:, 2], T[:, 0]))
-    #     J = np.concatenate((T[:, 2], T[:, 0], T[:, 1]))
-    #     S = np.arange(self.nf)
-    #     S = np.concatenate((S, S, S))
-    #     E = csr_matrix((S + 1, (I, J)), shape=(self.nv, self.nv))
-    #     Elisto = np.vstack((I, J)).T
-    #     sElist = np.sort(Elisto, axis=1)
-    #     s = (self.normv(Elisto - sElist) > 1e-12)
-    #     t = S * (-1) ** s
-    #     edges, une = np.unique(sElist, axis=0, return_index=True)
-    #     ne = edges.shape[0]
-    #     e2t = np.zeros((ne, 4), dtype=int)
-    #     t2e = np.zeros((self.nf, 3), dtype=int)
-    #     ie = np.zeros(ne, dtype=int)
-    #     for m in range(len(edges)):
-    #         i, j = edges[m]
-    #         t1 = t[une[m]]
-    #         t2 = -(E[i, j] + E[j, i] - abs(t1)) * np.sign(t1)
-    #         e2t[m, :2] = [t1, t2]
-    #         f = T[abs(t1)]
-    #         loc = np.where(f == (f.sum() - i - j))[0]
-    #         t2e[abs(t1), loc] = m * np.sign(t1)
-    #         e2t[m, 2] = loc
-    #         if t2 != 0:
-    #             f = T[abs(t2)]
-    #             loc = np.where(f == (f.sum() - i - j))[0]
-    #             t2e[abs(t2), loc] = m * np.sign(t2)
-    #             e2t[m, 3] = loc
-    #             ie[m] = 1
-    #     v2e = csr_matrix((np.ones(len(edges)), (edges[:, 0], edges[:, 1])), shape=(self.nv, self.nv))
-    #     ne = edges.shape[0]
-    #     nie = np.sum(ie)
-    #     inner_edges = np.where(ie)[0]
-    #     bv = np.zeros(self.nv, dtype=int)
-    #     bv[edges[ie == 0].ravel()] = 1
-    #     bf = np.zeros(self.nf, dtype=int)
-    #     bf[np.sum(np.isin(self.faces, np.where(bv == 1)[0]), axis=1) > 0] = 1
-    #     t1 = abs(e2t[inner_edges, 0])
-    #     t2 = abs(e2t[inner_edges, 1])
-    #     I = np.arange(2 * nie)
-    #     S = np.ones(2 * nie)
-    #     e2t1 = csr_matrix((S, (I, np.concatenate((t1, t1 + self.nf)))), shape=(2 * nie, 2 * self.nf))
-    #     e2t2 = csr_matrix((S, (I, np.concatenate((t2, t2 + self.nf)))), shape=(2 * nie, 2 * self.nf))
-    #     return e2t, t2e, v2e, ie, ne, nie, inner_edges, bv, bf
 
     def normalize_mesh(self, bbdO=1):
         xx = self.vertices - self.vertices.mean(axis=0)
@@ -394,24 +346,6 @@ class MeshClass:
     @staticmethod
     def set_camera(ca, cam):
         ca.view_init(elev=cam[0], azim=cam[1])
-
-    # @staticmethod
-    # def cotLaplacian(mesh):
-    #     T = mesh.faces
-    #     I = np.concatenate((T[:, 1], T[:, 2], T[:, 0], T[:, 2], T[:, 0], T[:, 1]))
-    #     J = np.concatenate((T[:, 2], T[:, 0], T[:, 1], T[:, 1], T[:, 2], T[:, 0]))
-    #     E1 = mesh.vertices[I] - mesh.vertices[J]
-    #     E2 = mesh.vertices[np.concatenate((T[:, 0], T[:, 1], T[:, 2]))] - mesh.vertices[J]
-    #     E3 = mesh.vertices[I] - mesh.vertices[np.concatenate((T[:, 0], T[:, 1], T[:, 2]))]
-    #     A = 0.5 * np.sqrt(np.sum(np.cross(E1, E2) ** 2, axis=1))
-    #     cot12 = np.sum(E1 * E2, axis=1) / A
-    #     cot23 = np.sum(-E3 * E1, axis=1) / A
-    #     cot31 = np.sum(E2 * E3, axis=1) / A
-    #     In = np.concatenate((I, J, I, J))
-    #     Jn = np.concatenate((J, I, I, J))
-    #     Sn = np.concatenate((cot12, cot12, cot23, cot31))
-    #     W = csr_matrix((Sn, (In, Jn)), shape=(mesh.nv, mesh.nv))
-    #     return W
 
     @staticmethod
     def cotLaplacian(mesh, L23=None, L13=None, L12=None):
