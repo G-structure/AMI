@@ -1,0 +1,9 @@
+Metadata-Version: 2.1
+Name: Geo-R2024a
+Version: 24.1
+Summary: A Python interface to Geo
+Home-page: https://www.mathworks.com/
+Author: MathWorks
+Platform: Linux
+Platform: Windows
+Platform: macOS
