@@ -13,6 +13,7 @@ r = redis.Redis(host='localhost', port=6379, db=0)
 # Add items to the queue
 queue_name = 'matlab_data'
 
+# filename = 'data/bent_pipe_closed_lr.off'
 filename = 'data/spot_rr.off'
 
 def load_off_file(filename):
