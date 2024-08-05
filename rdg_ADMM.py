@@ -198,12 +198,12 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
     # Pre-factorization
     if reg == 'D':
         Ww_p_dense = Ww_p.toarray()
-        perm = reverse_cuthill_mckee(csc_matrix(Ww_p_dense))
-        P = np.eye(Ww_p_dense.shape[0])[:, perm]
-        Ww_p_permuted = P.T @ Ww_p_dense @ P
-        c, low = cho_factor(Ww_p_permuted, lower=True)
-        print(f"Size of L: {c.shape}")
-        print(f"Size of P: {P.shape}")
+        # perm = reverse_cuthill_mckee(csc_matrix(Ww_p_dense))
+        # P = np.eye(Ww_p_dense.shape[0])[:, perm]
+        # Ww_p_permuted = P.T @ Ww_p_dense @ P
+        c, low = cho_factor(Ww_p_dense, lower=True)
+        # print(f"Size of L: {c.shape}")
+        # print(f"Size of P: {P.shape}")
     else:  # 'H', 'vfa'
         if not varRho:
             Ww_combined = alpha * Ww_s_p + rho * Ww_p
@@ -226,7 +226,8 @@ def rdg_ADMM(Mm, x0, reg='D', alpha_hat=0.1, beta_hat=0, vf=0):
 
 
         if reg == 'D':
-            u_p = P @ cho_solve((c, low), P.T @ b) / (alpha + rho)
+            # u_p = P @ cho_solve((c, low), P.T @ b) / (alpha + rho)
+            u_p = (np.linalg.solve(c.T, np.linalg.solve(c, b))) / (alpha + rho)
         else:  # 'H', 'vfa'
             if not varRho:
                 u_p = P @ cho_solve((c, low), P.T @ b)
