@@ -1,6 +1,7 @@
 import potpourri3d as pp3d
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.sparse import csr_matrix
 
 # filename = 'data/bent_pipe_closed_lr.off'
 filename = 'data/spot_rr.off'
@@ -82,7 +83,53 @@ for row in row_order[1:-1]:
 col_order.append([item['vert_index'] for item in row_order[-1]])
 S = col_order
 
+def build_graph_from_S(S):
+    # Initialize an empty adjacency matrix
+    adjacency_matrix = np.zeros((S.shape[0] * S.shape[1], S.shape[0] * S.shape[1]))
 
+    # Iterate over the rows and columns of S
+    for i in range(S.shape[0]):
+        for j in range(S.shape[1]):
+
+            # Every vertex is connected to itself
+            adjacency_matrix[i * S.shape[1] + j, i * S.shape[1] + j] = 1
+
+            # Connect the current vertex with the vertices in the adjacent rows and columns
+            if (i > 0):
+                adjacency_matrix[i * S.shape[1] + j, (i - 1) * S.shape[1] + j] = 1
+            if (j > 0):
+                adjacency_matrix[i * S.shape[1] + j, i * S.shape[1] + j - 1] = 1
+            if (i < S.shape[0] - 1):
+                adjacency_matrix[i * S.shape[1] + j, (i + 1) * S.shape[1] + j] = 1
+            if (j < S.shape[1] - 1):
+                adjacency_matrix[i * S.shape[1] + j, i * S.shape[1] + j + 1] = 1
+
+    # Convert the adjacency matrix to a sparse representation for efficient computation
+    adjacency_matrix = csr_matrix(adjacency_matrix)
+
+    return adjacency_matrix
+
+def build_Xg(S):
+    Xg = {}
+    for i, row in enumerate(S):
+        for j, stitch in enumerate(row):
+            # Convert each stitch to a unique string
+            node_str = f"({i}, {j})"
+            Xg[node_str] = []
+
+            # For each stitch, add an edge to the stitches
+            # to its right and below, if they exist
+            if j + 1 < len(row):
+                right_str = f"({i}, {j + 1})"
+                Xg[node_str].append(right_str)
+
+            if i + 1 < len(S):
+                down_str = f"({i + 1}, {j})"
+                Xg[node_str].append(down_str)
+
+    return Xg
+
+xg = build_Xg(S)
 # Create a 3D scatter plot of the vertices, colored by the geodesic distances
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
