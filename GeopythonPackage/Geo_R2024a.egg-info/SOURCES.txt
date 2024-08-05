@@ -1,8 +1,0 @@
-pyproject.toml
-setup.py
-Geo/Geo.ctf
-Geo/__init__.py
-Geo_R2024a.egg-info/PKG-INFO
-Geo_R2024a.egg-info/SOURCES.txt
-Geo_R2024a.egg-info/dependency_links.txt
-Geo_R2024a.egg-info/top_level.txt
